@@ -1932,7 +1932,7 @@ extern "C" bool cr_plugin_open(cr_plugin &ctx, const char *fullpath) {
         return false;
     }
     auto p = new(CR_MALLOC(sizeof(cr_internal))) cr_internal;
-    p->mode = CR_OP_MODE;
+    p->mode = (cr_mode)CR_OP_MODE;
     p->fullname = fullpath;
     ctx.p = p;
     ctx.next_version = 1;
