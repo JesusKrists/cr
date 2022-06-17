@@ -537,6 +537,22 @@ struct cr_plugin {
     unsigned int next_version;
     unsigned int last_working_version;
 
+    template <typename T>
+    inline T *CreateState() {
+        if (userdata == nullptr) {
+            userdata = new T{};
+        }
+
+        return (T *)userdata;
+    }
+
+    template <typename T>
+    inline void DeleteState(T *data) {
+        if (data == userdata) {
+            delete data;
+        }
+    }
+
     inline bool Open(const std::string &pluginPath) {
         return cr_plugin_open(*this, pluginPath.c_str());
     }
