@@ -550,6 +550,7 @@ struct cr_plugin {
     inline void DeleteState(T *data) {
         if (data == userdata) {
             delete data;
+            userdata = nullptr;
         }
     }
 
