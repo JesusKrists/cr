@@ -1595,8 +1595,9 @@ typedef struct mach_header macho_hdr;
 // save section information to be used during load/unload when copying
 // around global state (from .bss and .state binary sections).
 // vaddr = is the in memory loaded address of the segment-section
-void cr_macho_section_save(cr_plugin &ctx, cr_plugin_section_type::e type,
-                           intptr_t addr, size_t size) {
+static void cr_macho_section_save(cr_plugin &ctx,
+                                  cr_plugin_section_type::e type, intptr_t addr,
+                                  size_t size) {
     const auto version = cr_plugin_section_version::current;
     auto p = (cr_internal *)ctx.p;
     auto data = &p->data[type][version];
@@ -1892,7 +1893,7 @@ static void cr_plugin_sections_backup(cr_plugin &ctx) {
         return;
     }
     CR_TRACE
-
+    /*
     for (int i = 0; i < cr_plugin_section_type::count; ++i) {
         auto cur = &p->data[i][cr_plugin_section_version::current];
         if (cur->ptr) {
@@ -1906,7 +1907,7 @@ static void cr_plugin_sections_backup(cr_plugin &ctx) {
                 std::memcpy(bkp->data, cur->data, bkp->size);
             }
         }
-    }
+    }*/
 }
 
 // internal
