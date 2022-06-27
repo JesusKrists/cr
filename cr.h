@@ -530,8 +530,8 @@ static void cr_plugin_close(cr_plugin &ctx);
 // - failure is the (platform specific) last error code for any crash that may
 //   happen to cause a rollback reload used by the crash protection system
 struct cr_plugin {
-    void *p;
-    void *userdata;
+    void *p = nullptr;
+    void *userdata = nullptr;
     unsigned int version;
     enum cr_failure failure;
     unsigned int next_version;
@@ -559,11 +559,15 @@ struct cr_plugin {
     }
 
     inline int Update() {
-        return cr_plugin_update(*this);
+        if (p != nullptr)
+            return cr_plugin_update(*this);
+
+        return -1;
     }
 
     ~cr_plugin() {
-        cr_plugin_close(*this);
+        if (p != nullptr)
+            cr_plugin_close(*this);
     }
 };
 
