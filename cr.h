@@ -441,7 +441,8 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 #define CR_OSX
 #define CR_PLUGIN(name) "lib" name ".dylib"
 #else
-#error "Unknown/unsupported platform, please open an issue if you think this \
+#error                                                                         \
+    "Unknown/unsupported platform, please open an issue if you think this \
 platform should be supported."
 #endif // CR_WINDOWS || CR_LINUX || CR_OSX
 
