@@ -591,10 +591,15 @@ struct cr_plugin {
 #endif
 
 static bool cr_plugin_open(cr_plugin &ctx, const char *fullpath) {
+    (void)ctx;
+    (void)fullpath;
 }
 static int cr_plugin_update(cr_plugin &ctx, bool reloadCheck) {
+    (void)ctx;
+    (void)reloadCheck;
 }
 static void cr_plugin_close(cr_plugin &ctx) {
+    (void)ctx;
 }
 
 #else // #ifndef CR_HOST
@@ -779,10 +784,10 @@ static bool cr_plugin_changed(cr_plugin &ctx);
 static bool cr_plugin_rollback(cr_plugin &ctx);
 static int cr_plugin_main(cr_plugin &ctx, cr_op operation);
 
-static void cr_set_temporary_path(cr_plugin &ctx, const std::string &path) {
-    auto pimpl = (cr_internal *)ctx.p;
-    pimpl->temppath = path;
-}
+// static void cr_set_temporary_path(cr_plugin &ctx, const std::string &path) {
+//     auto pimpl = (cr_internal *)ctx.p;
+//     pimpl->temppath = path;
+// }
 
 #if defined(CR_WINDOWS)
 
@@ -2109,9 +2114,9 @@ static bool cr_plugin_open(cr_plugin &ctx, const char *fullpath) {
 }
 
 // 20200109 [DEPRECATED] Use `cr_plugin_open` instead.
-static bool cr_plugin_load(cr_plugin &ctx, const char *fullpath) {
-    return cr_plugin_open(ctx, fullpath);
-}
+// static bool cr_plugin_load(cr_plugin &ctx, const char *fullpath) {
+//    return cr_plugin_open(ctx, fullpath);
+//}
 
 // Call to cleanup internal state once the plugin is not required anymore.
 static void cr_plugin_close(cr_plugin &ctx) {
