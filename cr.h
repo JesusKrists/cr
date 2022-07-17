@@ -1225,7 +1225,7 @@ static cr_plugin_main_func cr_so_symbol(so_handle handle) {
 
 static jmp_buf env;
 static void cr_signal_handler(int sig) {
-    __builtin_longjmp(env, 1);
+    __builtin_longjmp((void **)env, 1);
 }
 
 static cr_failure cr_signal_to_failure(int sig) {
@@ -1291,7 +1291,7 @@ static int cr_plugin_main(cr_plugin &ctx, cr_op operation) {
         return -1;
     }
 #else
-    if (int sig = __builtin_setjmp(env)) {
+    if (int sig = __builtin_setjmp((void **)env)) {
         ctx.version = ctx.last_working_version;
         ctx.failure = cr_signal_to_failure(sig);
         CR_LOG("1 FAILURE: %d (CR: %d)\n", sig, ctx.failure);
