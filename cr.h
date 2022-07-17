@@ -433,7 +433,12 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 //
 #if defined(_WIN32)
 #define CR_WINDOWS
+
+#ifdef __MINGW32__
+#define CR_PLUGIN(name) "lib" name ".dll"
+#else
 #define CR_PLUGIN(name) "" name ".dll"
+#endif
 #elif defined(__linux__)
 #define CR_LINUX
 #define CR_PLUGIN(name) "lib" name ".so"
