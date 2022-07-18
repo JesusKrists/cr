@@ -446,8 +446,7 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 #define CR_OSX
 #define CR_PLUGIN(name) "lib" name ".dylib"
 #else
-#error                                                                         \
-    "Unknown/unsupported platform, please open an issue if you think this \
+#error "Unknown/unsupported platform, please open an issue if you think this \
 platform should be supported."
 #endif // CR_WINDOWS || CR_LINUX || CR_OSX
 
@@ -525,10 +524,57 @@ enum cr_failure {
 #include <string>
 struct cr_plugin;
 
-typedef int (*cr_plugin_main_func)(struct cr_plugin *ctx, enum cr_op operation);
+namespace cr_plugin_section_type {
+enum e { state, bss, count };
+}
+
+namespace cr_plugin_section_version {
+enum e { backup, current, count };
+}
+
+struct cr_plugin_section {
+    cr_plugin_section_type::e type = {};
+    intptr_t base = 0;
+    char *ptr = 0;
+    int64_t size = 0;
+    void *data = nullptr;
+};
+
+struct cr_plugin_segment {
+    char *ptr = 0;
+    int64_t size = 0;
+};
+
+// keep track of some internal state about the plugin, should not be messed
+// with by user
+struct cr_internal {
+    std::string fullname = {};
+    std::string temppath = {};
+    time_t timestamp = {};
+    void *handle = nullptr;
+    cr_plugin_segment seg = {};
+    cr_plugin_section data[cr_plugin_section_type::count]
+                          [cr_plugin_section_version::count] = {};
+    cr_mode mode = CR_SAFEST;
+    bool reload = true;
+    int reloadIterationSkipCount = 0;
+};
+
 static bool cr_plugin_open(cr_plugin &ctx, const char *fullpath);
 static int cr_plugin_update(cr_plugin &ctx, bool reloadCheck = true);
 static void cr_plugin_close(cr_plugin &ctx);
+
+#if defined(CR_WINDOWS)
+using so_handle = HMODULE;
+#else
+using so_handle = void *;
+#endif
+
+template <typename T>
+static T cr_so_symbol(so_handle handle, const std::string &symbolName);
+
+template <typename T, typename Ret>
+static Ret cr_plugin_call(cr_plugin &ctx, T func);
 
 // public interface for the plugin context, this has some user facing
 // variables that may be used to manage reload feedback.
@@ -544,38 +590,44 @@ struct cr_plugin {
     enum cr_failure failure;
     unsigned int next_version;
     unsigned int last_working_version;
+    std::string pluginFactorySymbolName;
 
-    template <typename T>
-    inline T *CreateState() {
-        if (userdata == nullptr) {
-            userdata = new T{};
+    inline bool Open(const std::string &pluginPath,
+                     const std::string &pluginFactorySymbolName) {
+        this->pluginFactorySymbolName = pluginFactorySymbolName;
+        if (p == nullptr) {
+            bool opened = cr_plugin_open(*this, pluginPath.c_str());
+            if (opened) {
+                Update();
+            }
+            return opened;
         }
 
-        return (T *)userdata;
+        return false;
     }
 
     template <typename T>
-    inline void DeleteState(T *data) {
-        if (data == userdata) {
-            delete data;
-            userdata = nullptr;
-        }
-    }
+    inline T CreatePlugin() {
+        using PluginFactoryFunc = T (*)();
 
-    inline bool Open(const std::string &pluginPath) {
-        return cr_plugin_open(*this, pluginPath.c_str());
+        auto *p2 = (cr_internal *)p;
+        auto func = cr_so_symbol<PluginFactoryFunc>(p2->handle,
+                                                    pluginFactorySymbolName);
+        return cr_plugin_call<PluginFactoryFunc, T>(*this, func);
     }
 
     inline int Update() {
-        if (p != nullptr)
+        if (p != nullptr) {
             return cr_plugin_update(*this);
+        }
 
         return -1;
     }
 
     ~cr_plugin() {
-        if (p != nullptr)
+        if (p != nullptr) {
             cr_plugin_close(*this);
+        }
     }
 };
 
@@ -598,10 +650,12 @@ struct cr_plugin {
 static bool cr_plugin_open(cr_plugin &ctx, const char *fullpath) {
     (void)ctx;
     (void)fullpath;
+    return true;
 }
 static int cr_plugin_update(cr_plugin &ctx, bool reloadCheck) {
     (void)ctx;
     (void)reloadCheck;
+    return 0;
 }
 static void cr_plugin_close(cr_plugin &ctx) {
     (void)ctx;
@@ -738,43 +792,6 @@ static std::string cr_version_path(const std::string &basepath,
     return folder + fname + ver + ext;
 }
 
-namespace cr_plugin_section_type {
-enum e { state, bss, count };
-}
-
-namespace cr_plugin_section_version {
-enum e { backup, current, count };
-}
-
-struct cr_plugin_section {
-    cr_plugin_section_type::e type = {};
-    intptr_t base = 0;
-    char *ptr = 0;
-    int64_t size = 0;
-    void *data = nullptr;
-};
-
-struct cr_plugin_segment {
-    char *ptr = 0;
-    int64_t size = 0;
-};
-
-// keep track of some internal state about the plugin, should not be messed
-// with by user
-struct cr_internal {
-    std::string fullname = {};
-    std::string temppath = {};
-    time_t timestamp = {};
-    void *handle = nullptr;
-    cr_plugin_main_func main = nullptr;
-    cr_plugin_segment seg = {};
-    cr_plugin_section data[cr_plugin_section_type::count]
-                          [cr_plugin_section_version::count] = {};
-    cr_mode mode = CR_SAFEST;
-    bool reload = true;
-    int reloadIterationSkipCount = 0;
-};
-
 static bool cr_plugin_section_validate(cr_plugin &ctx,
                                        cr_plugin_section_type::e type,
                                        intptr_t vaddr, intptr_t ptr,
@@ -787,7 +804,6 @@ static void cr_plugin_reload(cr_plugin &ctx);
 static int cr_plugin_unload(cr_plugin &ctx, bool rollback, bool close);
 static bool cr_plugin_changed(cr_plugin &ctx);
 static bool cr_plugin_rollback(cr_plugin &ctx);
-static int cr_plugin_main(cr_plugin &ctx, cr_op operation);
 
 // static void cr_set_temporary_path(cr_plugin &ctx, const std::string &path) {
 //     auto pimpl = (cr_internal *)ctx.p;
@@ -1215,13 +1231,14 @@ static so_handle cr_so_load(const std::string &filename) {
     return new_dll;
 }
 
-static cr_plugin_main_func cr_so_symbol(so_handle handle) {
+template <typename T>
+T cr_so_symbol(so_handle handle, const std::string &symbolName) {
     CR_ASSERT(handle);
-    auto new_main = (cr_plugin_main_func)GetProcAddress(handle, CR_MAIN_FUNC);
-    if (!new_main) {
-        CR_ERROR("Couldn't find plugin entry point: %d\n", GetLastError());
+    auto symbol = (T)GetProcAddress(handle, CR_MAIN_FUNC);
+    if (!symbol) {
+        CR_ERROR("Couldn't find symbol: %d\n", GetLastError());
     }
-    return new_main;
+    return symbol;
 }
 
 #ifdef __MINGW32__
@@ -1285,31 +1302,27 @@ static int cr_seh_filter(cr_plugin &ctx, unsigned long seh) {
     return EXCEPTION_CONTINUE_SEARCH;
 }
 
-static int cr_plugin_main(cr_plugin &ctx, cr_op operation) {
+template <typename T, typename Ret>
+Ret cr_plugin_call(cr_plugin &ctx, T func) {
     auto p = (cr_internal *)ctx.p;
 #ifndef __MINGW32__
     __try {
-        if (p->main) {
-            return p->main(&ctx, operation);
-        }
+        return func();
     } __except (cr_seh_filter(ctx, GetExceptionCode())) {
-        return -1;
+        return nullptr;
     }
 #else
     if (int sig = __builtin_setjmp((void **)env)) {
         ctx.version = ctx.last_working_version;
         ctx.failure = cr_signal_to_failure(sig);
         CR_LOG("1 FAILURE: %d (CR: %d)\n", sig, ctx.failure);
-        return -1;
     } else {
         CR_ASSERT(p);
-        if (p->main) {
-            return p->main(&ctx, operation);
-        }
+        return func();
     }
 #endif
 
-    return -1;
+    return nullptr;
 }
 
 #endif // CR_WINDOWS
@@ -1710,7 +1723,6 @@ static void cr_so_unload(cr_plugin &ctx) {
     }
 
     p->handle = nullptr;
-    p->main = nullptr;
 }
 
 static so_handle cr_so_load(const std::string &new_file) {
@@ -1721,15 +1733,15 @@ static so_handle cr_so_load(const std::string &new_file) {
     }
     return new_dll;
 }
-
-static cr_plugin_main_func cr_so_symbol(so_handle handle) {
+template <typename T>
+T cr_so_symbol(so_handle handle, const std::string &symbolName) {
     CR_ASSERT(handle);
     dlerror();
-    auto new_main = (cr_plugin_main_func)dlsym(handle, CR_MAIN_FUNC);
-    if (!new_main) {
+    auto symbol = (T)dlsym(handle, symbolName.c_str());
+    if (!symbol) {
         CR_ERROR("Couldn't find plugin entry point: %s\n", dlerror());
     }
-    return new_main;
+    return symbol;
 }
 
 inline sigjmp_buf env;
@@ -1785,21 +1797,19 @@ static cr_failure cr_signal_to_failure(int sig) {
     return static_cast<cr_failure>(CR_OTHER + sig);
 }
 
-static int cr_plugin_main(cr_plugin &ctx, cr_op operation) {
+template <typename T, typename Ret>
+Ret cr_plugin_call(cr_plugin &ctx, T func) {
     if (int sig = sigsetjmp(env, 1)) {
         ctx.version = ctx.last_working_version;
         ctx.failure = cr_signal_to_failure(sig);
         CR_LOG("1 FAILURE: %d (CR: %d)\n", sig, ctx.failure);
-        return -1;
     } else {
         auto p = (cr_internal *)ctx.p;
         CR_ASSERT(p);
-        if (p->main) {
-            return p->main(&ctx, operation);
-        }
+        return func();
     }
 
-    return -1;
+    return nullptr;
 }
 
 #endif // CR_LINUX || CR_OSX
@@ -1857,14 +1867,8 @@ static bool cr_plugin_load_internal(cr_plugin &ctx, bool rollback) {
             cr_plugin_sections_reload(ctx, cr_plugin_section_version::current);
         }
 
-        auto new_main = cr_so_symbol(new_dll);
-        if (!new_main) {
-            return false;
-        }
-
         auto p2 = (cr_internal *)ctx.p;
         p2->handle = new_dll;
-        p2->main = new_main;
         if (ctx.failure != CR_BAD_IMAGE) {
             p2->timestamp = cr_last_write_time(file);
         }
@@ -2007,18 +2011,8 @@ static int cr_plugin_unload(cr_plugin &ctx, bool rollback, bool close) {
     auto p = (cr_internal *)ctx.p;
     int r = 0;
     if (p->handle) {
-        if (!rollback) {
-            r = cr_plugin_main(ctx, close ? CR_CLOSE : CR_UNLOAD);
-            // Don't store state if unload crashed.  Rollback will use backup.
-            if (r < 0) {
-                CR_LOG("4 FAILURE: %d\n", r);
-            } else {
-                cr_plugin_sections_store(ctx);
-            }
-        }
         cr_so_unload(ctx);
         p->handle = nullptr;
-        p->main = nullptr;
     }
     return r;
 }
@@ -2029,14 +2023,7 @@ static int cr_plugin_unload(cr_plugin &ctx, bool rollback, bool close) {
 // in turn may also cause more rollbacks.
 static bool cr_plugin_rollback(cr_plugin &ctx) {
     CR_TRACE
-    auto loaded = cr_plugin_load_internal(ctx, true);
-    if (loaded) {
-        loaded = cr_plugin_main(ctx, CR_LOAD) >= 0;
-        if (loaded) {
-            ctx.failure = CR_NONE;
-        }
-    }
-    return loaded;
+    return cr_plugin_load_internal(ctx, true);
 }
 
 // internal
@@ -2055,11 +2042,11 @@ static void cr_plugin_reload(cr_plugin &ctx) {
         if (!cr_plugin_load_internal(ctx, false)) {
             return;
         }
-        int r = cr_plugin_main(ctx, CR_LOAD);
+        /*int r = cr_plugin_main(ctx, CR_LOAD);
         if (r < 0 && !ctx.failure) {
             CR_LOG("2 FAILURE: %d\n", r);
             ctx.failure = CR_USER;
-        }
+        }*/
     } else {
         p->reload = cr_plugin_changed(ctx);
     }
@@ -2091,12 +2078,7 @@ static int cr_plugin_update(cr_plugin &ctx, bool reloadCheck) {
         return -2;
     }
 
-    int r = cr_plugin_main(ctx, CR_STEP);
-    if (r < 0 && !ctx.failure) {
-        CR_LOG("4 FAILURE: CR_USER\n");
-        ctx.failure = CR_USER;
-    }
-    return r;
+    return 0;
 }
 
 // Loads a plugin from the specified full path (or current directory if NULL).
