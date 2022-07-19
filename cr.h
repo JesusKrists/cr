@@ -697,7 +697,6 @@ Ret cr_plugin_call(cr_plugin &ctx, T func) {
         return nullptr;
     }
 #else
-    CR_ASSERT(p);
     return func();
 #endif
 }
