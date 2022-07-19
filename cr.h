@@ -61,12 +61,27 @@
 
 #if defined(_WIN32)
 #define CR_WINDOWS
+
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
+
+#define NOMINMAX
+#include <windows.h>
+
+#if defined(_MSC_VER)
+#include <dbghelp.h>
+#pragma comment(lib, "dbghelp.lib")
+
+#endif
+#undef CreateWindow
 #elif defined(__linux__)
 #define CR_LINUX
 #elif defined(__APPLE__)
 #define CR_OSX
 #else
-#error "Unknown/unsupported platform, please open an issue if you think this \
+#error                                                                         \
+    "Unknown/unsupported platform, please open an issue if you think this \
 platform should be supported."
 #endif // CR_WINDOWS || CR_LINUX || CR_OSX
 
@@ -153,7 +168,7 @@ struct cr_internal {
     std::string temppath = {};
     time_t timestamp = {};
     cr_mode mode = CR_DISABLE;
-    void *handle = nullptr;
+    so_handle handle = nullptr;
 };
 
 struct cr_plugin {
@@ -212,6 +227,8 @@ struct cr_plugin {
         if (p != nullptr) {
             return cr_plugin_reload(*this);
         }
+
+        return false;
     }
 
     ~cr_plugin() {
@@ -286,15 +303,6 @@ static std::string cr_version_path(const std::string &basepath,
 }
 
 #if defined(CR_WINDOWS)
-
-#ifndef WIN32_LEAN_AND_MEAN
-#define WIN32_LEAN_AND_MEAN
-#endif
-#include <dbghelp.h>
-#include <windows.h>
-#if defined(_MSC_VER)
-#pragma comment(lib, "dbghelp.lib")
-#endif
 
 #ifdef UNICODE
 #define CR_WINDOWS_ConvertPath(_newpath, _path)                                \
@@ -629,7 +637,7 @@ bool static cr_pdb_process(const std::string &desination) {
 static void cr_so_unload(cr_plugin &ctx) {
     auto *p = ctx.p;
     CR_ASSERT(p->handle);
-    FreeLibrary((HMODULE)p->handle);
+    FreeLibrary(p->handle);
 }
 
 static so_handle cr_so_load(const std::string &filename) {
@@ -644,7 +652,8 @@ static so_handle cr_so_load(const std::string &filename) {
 template <typename T>
 T cr_so_symbol(so_handle handle, const std::string &symbolName) {
     CR_ASSERT(handle);
-    auto symbol = (T)GetProcAddress(handle, symbolName.c_str());
+    auto symbol =
+        reinterpret_cast<T>(GetProcAddress(handle, symbolName.c_str()));
     if (!symbol) {
         CR_ERROR("Couldn't find symbol: %d\n", GetLastError());
     }
@@ -681,7 +690,6 @@ static int cr_seh_filter(cr_plugin &ctx, unsigned long seh) {
 
 template <typename T, typename Ret>
 Ret cr_plugin_call(cr_plugin &ctx, T func) {
-    auto p = (cr_internal *)ctx.p;
 #ifndef __MINGW32__
     __try {
         return func();
@@ -692,8 +700,6 @@ Ret cr_plugin_call(cr_plugin &ctx, T func) {
     CR_ASSERT(p);
     return func();
 #endif
-
-    return nullptr;
 }
 
 #endif // CR_WINDOWS
@@ -848,7 +854,7 @@ bool cr_plugin_load_internal(cr_plugin &ctx, bool rollback) {
 #endif // defined(_MSC_VER)
         }
 
-        static constexpr auto RELOAD_TRY_COUNT = 50;
+        static constexpr auto RELOAD_TRY_COUNT = 10000;
 
         so_handle new_dll = nullptr;
         for (int i = 0; i < RELOAD_TRY_COUNT; i++) {
