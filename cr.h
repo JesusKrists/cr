@@ -80,8 +80,7 @@
 #elif defined(__APPLE__)
 #define CR_OSX
 #else
-#error                                                                         \
-    "Unknown/unsupported platform, please open an issue if you think this \
+#error "Unknown/unsupported platform, please open an issue if you think this \
 platform should be supported."
 #endif // CR_WINDOWS || CR_LINUX || CR_OSX
 
